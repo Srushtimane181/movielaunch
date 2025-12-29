@@ -1,7 +1,17 @@
 import { useState } from "react";
-import { Search, MapPin, Menu, X, User } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
+import { Search, MapPin, Menu, X, User, LogOut, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 
 const navLinks = [
   { name: "Movies", href: "#movies" },
@@ -12,20 +22,32 @@ const navLinks = [
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [selectedCity, setSelectedCity] = useState("Mumbai");
+  const [selectedCity] = useState("Mumbai");
+
+  const { user, signOut, loading } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast({
+      title: "Signed Out",
+      description: "You have been successfully signed out.",
+    });
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between px-4">
         {/* Logo */}
-        <a href="/" className="flex items-center gap-2">
+        <Link to="/" className="flex items-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
             <span className="text-xl font-bold text-primary-foreground">B</span>
           </div>
           <span className="hidden text-xl font-bold text-foreground sm:inline-block">
             BookMyShow
           </span>
-        </a>
+        </Link>
 
         {/* Search Bar - Hidden on mobile */}
         <div className="hidden flex-1 items-center justify-center px-8 md:flex">
@@ -60,19 +82,46 @@ const Header = () => {
             <span>{selectedCity}</span>
           </button>
 
-          {/* Sign In Button */}
-          <Button
-            variant="default"
-            size="sm"
-            className="hidden rounded-full bg-primary px-6 text-primary-foreground hover:bg-primary/90 sm:inline-flex"
-          >
-            Sign In
-          </Button>
-
-          {/* Mobile User Icon */}
-          <Button variant="ghost" size="icon" className="sm:hidden">
-            <User className="h-5 w-5" />
-          </Button>
+          {/* Auth Section */}
+          {loading ? (
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          ) : user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="flex items-center gap-2 rounded-full"
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                    <User className="h-4 w-4" />
+                  </div>
+                  <span className="hidden text-sm sm:inline-block">
+                    {user.user_metadata?.full_name || user.email?.split("@")[0]}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => navigate("/bookings")}>
+                  <Ticket className="mr-2 h-4 w-4" />
+                  My Bookings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleSignOut}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sign Out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => navigate("/auth")}
+              className="hidden rounded-full bg-primary px-6 text-primary-foreground hover:bg-primary/90 sm:inline-flex"
+            >
+              Sign In
+            </Button>
+          )}
 
           {/* Mobile Menu Button */}
           <Button
@@ -120,13 +169,19 @@ const Header = () => {
               <MapPin className="h-4 w-4 text-primary" />
               <span>{selectedCity}</span>
             </button>
-            <Button
-              variant="default"
-              size="sm"
-              className="rounded-full bg-primary px-6 text-primary-foreground"
-            >
-              Sign In
-            </Button>
+            {!user && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => {
+                  navigate("/auth");
+                  setIsMenuOpen(false);
+                }}
+                className="rounded-full bg-primary px-6 text-primary-foreground"
+              >
+                Sign In
+              </Button>
+            )}
           </div>
         </div>
       )}
