@@ -3,8 +3,10 @@ import { format, addDays } from "date-fns";
 import { Movie } from "@/hooks/useMovies";
 import { useCreateBooking, useProcessPayment } from "@/hooks/useBookings";
 import { useShowtimes, Showtime } from "@/hooks/useTheaters";
+import { useShowtimeSeats } from "@/hooks/useSeats";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import {
   Dialog,
   DialogContent,
@@ -12,9 +14,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, Users, CreditCard, Check, Loader2, MapPin, Sparkles } from "lucide-react";
+import { Calendar, Clock, Users, CreditCard, Check, Loader2, MapPin, Sparkles, Armchair } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import SeatMap from "./SeatMap";
 
 interface BookingDialogProps {
   movie: Movie;
@@ -33,10 +36,11 @@ interface TheaterWithShowtimes {
 }
 
 const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
-  const [step, setStep] = useState<"theater" | "seats" | "payment" | "success">("theater");
+  const [step, setStep] = useState<"theater" | "seats-count" | "seat-select" | "payment" | "success">("theater");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedShowtime, setSelectedShowtime] = useState<Showtime | null>(null);
-  const [seats, setSeats] = useState(1);
+  const [seatCount, setSeatCount] = useState(1);
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
 
@@ -49,6 +53,10 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
   const { data: showtimes, isLoading: isLoadingShowtimes } = useShowtimes(
     movie.id,
     format(selectedDate, "yyyy-MM-dd")
+  );
+
+  const { data: seats, isLoading: isLoadingSeats } = useShowtimeSeats(
+    selectedShowtime?.id || ""
   );
 
   // Group showtimes by theater
@@ -70,7 +78,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
     return Object.values(grouped);
   }, [showtimes]);
 
-  const totalPrice = selectedShowtime ? selectedShowtime.price * seats : 0;
+  const totalPrice = selectedShowtime ? selectedShowtime.price * seatCount : 0;
 
   const handleSelectShowtime = (showtime: Showtime) => {
     if (!user) {
@@ -84,22 +92,61 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
       return;
     }
     setSelectedShowtime(showtime);
-    setStep("seats");
+    setStep("seats-count");
+  };
+
+  const handleSeatCountConfirm = () => {
+    setSelectedSeats([]);
+    setStep("seat-select");
+  };
+
+  const handleSeatSelect = (seatNumber: string) => {
+    setSelectedSeats((prev) => {
+      if (prev.includes(seatNumber)) {
+        return prev.filter((s) => s !== seatNumber);
+      }
+      if (prev.length < seatCount) {
+        return [...prev, seatNumber];
+      }
+      return prev;
+    });
   };
 
   const handleProceedToPayment = async () => {
-    if (!selectedShowtime) return;
+    if (!selectedShowtime || selectedSeats.length !== seatCount) {
+      toast({
+        title: "Select Seats",
+        description: `Please select exactly ${seatCount} seat(s).`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsProcessing(true);
 
     try {
       const booking = await createBooking.mutateAsync({
         movieId: movie.id,
-        seats,
+        seats: seatCount,
         totalPrice,
         showDate: format(selectedDate, "yyyy-MM-dd"),
         showTime: selectedShowtime.show_time,
       });
+
+      // Update the booked_seats in the booking
+      await supabase
+        .from("bookings")
+        .update({ booked_seats: selectedSeats })
+        .eq("id", booking.id);
+
+      // Mark seats as booked in showtime_seats
+      for (const seatNumber of selectedSeats) {
+        await supabase
+          .from("showtime_seats")
+          .update({ is_booked: true, booking_id: booking.id })
+          .eq("showtime_id", selectedShowtime.id)
+          .eq("seat_number", seatNumber);
+      }
 
       setBookingId(booking.id);
       setStep("payment");
@@ -130,7 +177,8 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
     setTimeout(() => {
       setStep("theater");
       setSelectedShowtime(null);
-      setSeats(1);
+      setSeatCount(1);
+      setSelectedSeats([]);
       setBookingId(null);
     }, 300);
   };
@@ -144,6 +192,8 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
     const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
     return `${displayHour}:${minutes} ${ampm}`;
   };
+
+  const availableSeatsCount = seats?.filter((s) => !s.is_booked).length || 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -261,7 +311,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
           </div>
         )}
 
-        {step === "seats" && selectedShowtime && (
+        {step === "seats-count" && selectedShowtime && (
           <div className="space-y-6">
             {/* Selected Showtime Summary */}
             <div className="rounded-lg bg-secondary p-4">
@@ -285,40 +335,40 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
               </div>
             </div>
 
-            {/* Seats Selection */}
+            {/* Seats Count Selection */}
             <div>
               <label className="mb-2 flex items-center gap-2 text-sm font-medium text-card-foreground">
                 <Users className="h-4 w-4" />
-                Number of Seats (Max: {selectedShowtime.available_seats})
+                How many tickets?
               </label>
               <div className="flex items-center gap-4">
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => setSeats(Math.max(1, seats - 1))}
-                  disabled={seats <= 1}
+                  onClick={() => setSeatCount(Math.max(1, seatCount - 1))}
+                  disabled={seatCount <= 1}
                 >
                   -
                 </Button>
                 <span className="w-8 text-center text-lg font-semibold text-card-foreground">
-                  {seats}
+                  {seatCount}
                 </span>
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => setSeats(Math.min(Math.min(10, selectedShowtime.available_seats), seats + 1))}
-                  disabled={seats >= Math.min(10, selectedShowtime.available_seats)}
+                  onClick={() => setSeatCount(Math.min(10, seatCount + 1))}
+                  disabled={seatCount >= 10}
                 >
                   +
                 </Button>
               </div>
             </div>
 
-            {/* Price Summary */}
+            {/* Price Preview */}
             <div className="rounded-lg bg-secondary p-4">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">
-                  {seats} seat{seats > 1 ? "s" : ""} × ₹{selectedShowtime.price}
+                  {seatCount} ticket{seatCount > 1 ? "s" : ""} × ₹{selectedShowtime.price}
                 </span>
                 <span className="text-xl font-bold text-card-foreground">₹{totalPrice}</span>
               </div>
@@ -329,9 +379,68 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
                 Back
               </Button>
               <Button
+                onClick={handleSeatCountConfirm}
+                className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Armchair className="mr-2 h-4 w-4" />
+                Select Seats
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === "seat-select" && selectedShowtime && (
+          <div className="space-y-6">
+            {/* Header Info */}
+            <div className="rounded-lg bg-secondary p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div>
+                  <span className="text-muted-foreground">{selectedShowtime.theaters.name}</span>
+                  <span className="mx-2 text-border">|</span>
+                  <span className="text-muted-foreground">{format(selectedDate, "EEE, MMM d")}</span>
+                  <span className="mx-2 text-border">|</span>
+                  <span className="text-muted-foreground">{formatShowTime(selectedShowtime.show_time)}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {availableSeatsCount} seats available
+                </span>
+              </div>
+            </div>
+
+            {/* Seat Map */}
+            {isLoadingSeats ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : seats ? (
+              <SeatMap
+                seats={seats}
+                selectedSeats={selectedSeats}
+                onSeatSelect={handleSeatSelect}
+                maxSeats={seatCount}
+              />
+            ) : null}
+
+            {/* Price Summary */}
+            <div className="rounded-lg bg-secondary p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">
+                  {selectedSeats.length} seat{selectedSeats.length !== 1 ? "s" : ""} × ₹{selectedShowtime.price}
+                </span>
+                <span className="text-xl font-bold text-card-foreground">
+                  ₹{selectedShowtime.price * selectedSeats.length}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={() => setStep("seats-count")} className="flex-1">
+                Back
+              </Button>
+              <Button
                 onClick={handleProceedToPayment}
                 className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={isProcessing}
+                disabled={isProcessing || selectedSeats.length !== seatCount}
               >
                 {isProcessing ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -371,7 +480,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Seats</span>
-                  <span className="text-card-foreground">{seats}</span>
+                  <span className="text-card-foreground">{selectedSeats.sort().join(", ")}</span>
                 </div>
                 <div className="mt-4 flex justify-between border-t border-border pt-4">
                   <span className="font-semibold text-card-foreground">Total</span>
@@ -390,7 +499,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
             </div>
 
             <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setStep("seats")} className="flex-1">
+              <Button variant="outline" onClick={() => setStep("seat-select")} className="flex-1">
                 Back
               </Button>
               <Button
@@ -446,7 +555,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Seats</span>
-                  <span className="text-card-foreground">{seats}</span>
+                  <span className="text-card-foreground">{selectedSeats.sort().join(", ")}</span>
                 </div>
               </div>
             </div>

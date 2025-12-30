@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       bookings: {
         Row: {
+          booked_seats: string[] | null
           created_at: string
           id: string
           movie_id: string
@@ -28,6 +29,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          booked_seats?: string[] | null
           created_at?: string
           id?: string
           movie_id: string
@@ -40,6 +42,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          booked_seats?: string[] | null
           created_at?: string
           id?: string
           movie_id?: string
@@ -141,6 +144,48 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      showtime_seats: {
+        Row: {
+          booking_id: string | null
+          created_at: string
+          id: string
+          is_booked: boolean
+          seat_number: string
+          showtime_id: string
+        }
+        Insert: {
+          booking_id?: string | null
+          created_at?: string
+          id?: string
+          is_booked?: boolean
+          seat_number: string
+          showtime_id: string
+        }
+        Update: {
+          booking_id?: string | null
+          created_at?: string
+          id?: string
+          is_booked?: boolean
+          seat_number?: string
+          showtime_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "showtime_seats_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "showtime_seats_showtime_id_fkey"
+            columns: ["showtime_id"]
+            isOneToOne: false
+            referencedRelation: "showtimes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       showtimes: {
         Row: {
