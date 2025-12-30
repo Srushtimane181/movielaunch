@@ -14,10 +14,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, Users, CreditCard, Check, Loader2, MapPin, Sparkles, Armchair } from "lucide-react";
+import { Calendar, Clock, Users, Loader2, MapPin, Sparkles, Armchair, Film } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import SeatMap from "./SeatMap";
+import PaymentForm from "./PaymentForm";
+import BookingReceipt from "./BookingReceipt";
 
 interface BookingDialogProps {
   movie: Movie;
@@ -112,7 +114,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
     });
   };
 
-  const handleProceedToPayment = async () => {
+  const handleProceedToPayment = () => {
     if (!selectedShowtime || selectedSeats.length !== seatCount) {
       toast({
         title: "Select Seats",
@@ -121,8 +123,11 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
       });
       return;
     }
+    setStep("payment");
+  };
 
-    setIsProcessing(true);
+  const handlePaymentComplete = async () => {
+    if (!selectedShowtime) return;
 
     try {
       const booking = await createBooking.mutateAsync({
@@ -136,7 +141,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
       // Update the booked_seats in the booking
       await supabase
         .from("bookings")
-        .update({ booked_seats: selectedSeats })
+        .update({ booked_seats: selectedSeats, status: "paid" })
         .eq("id", booking.id);
 
       // Mark seats as booked in showtime_seats
@@ -149,24 +154,20 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
       }
 
       setBookingId(booking.id);
-      setStep("payment");
-    } catch {
-      // Error handled in mutation
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handlePayment = async () => {
-    if (!bookingId) return;
-
-    setIsProcessing(true);
-
-    try {
-      await processPayment.mutateAsync(bookingId);
+      
+      // Show email notification toast
+      toast({
+        title: "📧 Booking Confirmed!",
+        description: "A confirmation email has been sent to your registered email address.",
+      });
+      
       setStep("success");
     } catch {
-      // Error handled in mutation
+      toast({
+        title: "Booking Failed",
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -180,6 +181,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
       setSeatCount(1);
       setSelectedSeats([]);
       setBookingId(null);
+      setIsProcessing(false);
     }, 300);
   };
 
@@ -195,12 +197,29 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
 
   const availableSeatsCount = seats?.filter((s) => !s.is_booked).length || 0;
 
+  const getStepTitle = () => {
+    switch (step) {
+      case "theater":
+        return `Book Tickets - ${movie.title}`;
+      case "seats-count":
+        return "How Many Tickets?";
+      case "seat-select":
+        return "Select Your Seats";
+      case "payment":
+        return "Complete Payment";
+      case "success":
+        return "Booking Confirmed!";
+      default:
+        return movie.title;
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-border bg-card">
         <DialogHeader>
           <DialogTitle className="text-xl text-card-foreground">
-            {step === "success" ? "Booking Confirmed!" : `Book Tickets - ${movie.title}`}
+            {getStepTitle()}
           </DialogTitle>
         </DialogHeader>
 
@@ -440,13 +459,8 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
               <Button
                 onClick={handleProceedToPayment}
                 className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={isProcessing || selectedSeats.length !== seatCount}
+                disabled={selectedSeats.length !== seatCount}
               >
-                {isProcessing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <CreditCard className="mr-2 h-4 w-4" />
-                )}
                 Proceed to Payment
               </Button>
             </div>
@@ -455,115 +469,47 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
 
         {step === "payment" && selectedShowtime && (
           <div className="space-y-6">
+            {/* Booking Summary */}
             <div className="rounded-lg bg-secondary p-4">
-              <h3 className="mb-4 text-lg font-semibold text-card-foreground">Order Summary</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Movie</span>
-                  <span className="text-card-foreground">{movie.title}</span>
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Film className="h-6 w-6 text-primary" />
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Theater</span>
-                  <span className="text-card-foreground">{selectedShowtime.theaters.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Date</span>
-                  <span className="text-card-foreground">
-                    {format(selectedDate, "EEE, MMM d, yyyy")}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Time</span>
-                  <span className="text-card-foreground">
-                    {formatShowTime(selectedShowtime.show_time)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Seats</span>
-                  <span className="text-card-foreground">{selectedSeats.sort().join(", ")}</span>
-                </div>
-                <div className="mt-4 flex justify-between border-t border-border pt-4">
-                  <span className="font-semibold text-card-foreground">Total</span>
-                  <span className="text-xl font-bold text-primary">₹{totalPrice}</span>
+                <div className="flex-1 space-y-1 text-sm">
+                  <h4 className="font-semibold text-card-foreground">{movie.title}</h4>
+                  <p className="text-muted-foreground">
+                    {selectedShowtime.theaters.name} • {format(selectedDate, "EEE, MMM d")} • {formatShowTime(selectedShowtime.show_time)}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Seats: {selectedSeats.sort().join(", ")}
+                  </p>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-lg border border-border p-4">
-              <h4 className="mb-2 text-sm font-medium text-card-foreground">
-                Mock Payment (Demo)
-              </h4>
-              <p className="text-xs text-muted-foreground">
-                This is a simulated payment. Click "Pay Now" to complete the mock transaction.
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setStep("seat-select")} className="flex-1">
-                Back
-              </Button>
-              <Button
-                onClick={handlePayment}
-                className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
-                disabled={isProcessing}
-              >
-                {isProcessing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>Pay ₹{totalPrice}</>
-                )}
-              </Button>
-            </div>
+            {/* Payment Form */}
+            <PaymentForm
+              totalAmount={totalPrice}
+              onPaymentComplete={handlePaymentComplete}
+              onBack={() => setStep("seat-select")}
+              isProcessing={isProcessing}
+              setIsProcessing={setIsProcessing}
+            />
           </div>
         )}
 
-        {step === "success" && selectedShowtime && (
-          <div className="space-y-6 text-center">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-500/20">
-              <Check className="h-8 w-8 text-green-500" />
-            </div>
-
-            <div>
-              <h3 className="text-xl font-semibold text-card-foreground">
-                Payment Successful!
-              </h3>
-              <p className="mt-2 text-muted-foreground">
-                Your tickets for {movie.title} have been booked successfully.
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-secondary p-4 text-left">
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Theater</span>
-                  <span className="text-card-foreground">{selectedShowtime.theaters.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Date</span>
-                  <span className="text-card-foreground">
-                    {format(selectedDate, "EEE, MMM d, yyyy")}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Time</span>
-                  <span className="text-card-foreground">
-                    {formatShowTime(selectedShowtime.show_time)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Seats</span>
-                  <span className="text-card-foreground">{selectedSeats.sort().join(", ")}</span>
-                </div>
-              </div>
-            </div>
-
-            <Button onClick={handleClose} className="w-full">
-              Done
-            </Button>
-          </div>
+        {step === "success" && selectedShowtime && bookingId && (
+          <BookingReceipt
+            movieTitle={movie.title}
+            theaterName={selectedShowtime.theaters.name}
+            theaterLocation={selectedShowtime.theaters.location}
+            showDate={selectedDate}
+            showTime={selectedShowtime.show_time}
+            seats={selectedSeats}
+            totalAmount={totalPrice}
+            bookingId={bookingId}
+            onClose={handleClose}
+          />
         )}
       </DialogContent>
     </Dialog>
