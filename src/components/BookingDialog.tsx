@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { format, addDays } from "date-fns";
 import { Movie } from "@/hooks/useMovies";
-import { useCreateBooking, useProcessPayment } from "@/hooks/useBookings";
+import { useCreateBooking } from "@/hooks/useBookings";
 import { useShowtimes, Showtime } from "@/hooks/useTheaters";
 import { useShowtimeSeats } from "@/hooks/useSeats";
 import { useAuth } from "@/hooks/useAuth";
@@ -14,9 +14,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, Users, Loader2, MapPin, Sparkles, Armchair, Film } from "lucide-react";
+import { Calendar, Clock, Users, Loader2, MapPin, Sparkles, Armchair, Film, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import SeatMap from "./SeatMap";
 import PaymentForm from "./PaymentForm";
 import BookingReceipt from "./BookingReceipt";
@@ -38,10 +39,10 @@ interface TheaterWithShowtimes {
 }
 
 const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
-  const [step, setStep] = useState<"theater" | "seats-count" | "seat-select" | "payment" | "success">("theater");
+  const [step, setStep] = useState<"select-seats" | "select-showtime" | "seat-map" | "payment" | "success">("select-seats");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedShowtime, setSelectedShowtime] = useState<Showtime | null>(null);
-  const [seatCount, setSeatCount] = useState(1);
+  const [seatCount, setSeatCount] = useState(2);
   const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
@@ -50,7 +51,6 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const createBooking = useCreateBooking();
-  const processPayment = useProcessPayment();
 
   const { data: showtimes, isLoading: isLoadingShowtimes } = useShowtimes(
     movie.id,
@@ -81,6 +81,7 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
   }, [showtimes]);
 
   const totalPrice = selectedShowtime ? selectedShowtime.price * seatCount : 0;
+  const dates = Array.from({ length: 14 }, (_, i) => addDays(new Date(), i));
 
   const handleSelectShowtime = (showtime: Showtime) => {
     if (!user) {
@@ -94,12 +95,8 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
       return;
     }
     setSelectedShowtime(showtime);
-    setStep("seats-count");
-  };
-
-  const handleSeatCountConfirm = () => {
     setSelectedSeats([]);
-    setStep("seat-select");
+    setStep("seat-map");
   };
 
   const handleSeatSelect = (seatNumber: string) => {
@@ -138,13 +135,11 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
         showTime: selectedShowtime.show_time,
       });
 
-      // Update the booked_seats in the booking
       await supabase
         .from("bookings")
         .update({ booked_seats: selectedSeats, status: "paid" })
         .eq("id", booking.id);
 
-      // Mark seats as booked in showtime_seats
       for (const seatNumber of selectedSeats) {
         await supabase
           .from("showtime_seats")
@@ -155,7 +150,6 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
 
       setBookingId(booking.id);
       
-      // Show email notification toast
       toast({
         title: "📧 Booking Confirmed!",
         description: "A confirmation email has been sent to your registered email address.",
@@ -176,16 +170,15 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
   const handleClose = () => {
     onOpenChange(false);
     setTimeout(() => {
-      setStep("theater");
+      setStep("select-seats");
       setSelectedShowtime(null);
-      setSeatCount(1);
+      setSeatCount(2);
       setSelectedSeats([]);
       setBookingId(null);
       setIsProcessing(false);
+      setSelectedDate(new Date());
     }, 300);
   };
-
-  const dates = Array.from({ length: 7 }, (_, i) => addDays(new Date(), i));
 
   const formatShowTime = (time: string) => {
     const [hours, minutes] = time.split(":");
@@ -199,11 +192,11 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
 
   const getStepTitle = () => {
     switch (step) {
-      case "theater":
+      case "select-seats":
         return `Book Tickets - ${movie.title}`;
-      case "seats-count":
-        return "How Many Tickets?";
-      case "seat-select":
+      case "select-showtime":
+        return "Select Date & Showtime";
+      case "seat-map":
         return "Select Your Seats";
       case "payment":
         return "Complete Payment";
@@ -223,62 +216,182 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
           </DialogTitle>
         </DialogHeader>
 
-        {step === "theater" && (
+        {/* Step 1: Select Number of Seats */}
+        {step === "select-seats" && (
           <div className="space-y-6">
-            {/* Date Selection */}
+            {/* Movie Info */}
+            <div className="flex items-start gap-4 rounded-lg bg-secondary/50 p-4">
+              {movie.poster_url && (
+                <img
+                  src={movie.poster_url}
+                  alt={movie.title}
+                  className="h-24 w-16 rounded-lg object-cover"
+                />
+              )}
+              <div className="flex-1">
+                <h3 className="font-semibold text-card-foreground">{movie.title}</h3>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {movie.genres?.slice(0, 3).map((genre) => (
+                    <span
+                      key={genre}
+                      className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                    >
+                      {genre}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {movie.duration} • {movie.language}
+                </p>
+              </div>
+            </div>
+
+            {/* Seats Count Selection */}
             <div>
-              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-card-foreground">
-                <Calendar className="h-4 w-4" />
+              <label className="mb-3 flex items-center gap-2 text-sm font-medium text-card-foreground">
+                <Users className="h-4 w-4 text-primary" />
+                How many seats?
+              </label>
+              <div className="flex items-center justify-center gap-4 rounded-lg bg-secondary/30 p-6">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-12 w-12 rounded-full text-xl"
+                  onClick={() => setSeatCount(Math.max(1, seatCount - 1))}
+                  disabled={seatCount <= 1}
+                >
+                  -
+                </Button>
+                <div className="flex flex-col items-center">
+                  <span className="text-4xl font-bold text-primary">{seatCount}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {seatCount === 1 ? "Seat" : "Seats"}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-12 w-12 rounded-full text-xl"
+                  onClick={() => setSeatCount(Math.min(10, seatCount + 1))}
+                  disabled={seatCount >= 10}
+                >
+                  +
+                </Button>
+              </div>
+            </div>
+
+            {/* Quick Select Options */}
+            <div className="flex justify-center gap-2">
+              {[1, 2, 3, 4, 5, 6].map((num) => (
+                <button
+                  key={num}
+                  onClick={() => setSeatCount(num)}
+                  className={`h-10 w-10 rounded-full text-sm font-medium transition-all ${
+                    seatCount === num
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-muted-foreground hover:bg-secondary/80"
+                  }`}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+
+            <Button
+              onClick={() => setStep("select-showtime")}
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              <Calendar className="mr-2 h-4 w-4" />
+              Select Date & Showtime
+            </Button>
+          </div>
+        )}
+
+        {/* Step 2: Select Date and Showtime */}
+        {step === "select-showtime" && (
+          <div className="space-y-6">
+            {/* Booking Summary Bar */}
+            <div className="flex items-center justify-between rounded-lg bg-primary/10 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Armchair className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium text-card-foreground">
+                  {seatCount} {seatCount === 1 ? "Seat" : "Seats"} Selected
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setStep("select-seats")}
+                className="text-xs text-primary hover:text-primary/80"
+              >
+                Change
+              </Button>
+            </div>
+
+            {/* Horizontal Date Selection */}
+            <div>
+              <label className="mb-3 flex items-center gap-2 text-sm font-medium text-card-foreground">
+                <Calendar className="h-4 w-4 text-primary" />
                 Select Date
               </label>
-              <div className="flex gap-2 overflow-x-auto pb-2">
-                {dates.map((date) => (
-                  <button
-                    key={date.toISOString()}
-                    onClick={() => setSelectedDate(date)}
-                    className={`flex min-w-[70px] flex-col items-center rounded-lg border p-3 transition-colors ${
-                      format(selectedDate, "yyyy-MM-dd") === format(date, "yyyy-MM-dd")
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border text-muted-foreground hover:border-primary/50"
-                    }`}
-                  >
-                    <span className="text-xs">{format(date, "EEE")}</span>
-                    <span className="text-lg font-semibold">{format(date, "d")}</span>
-                    <span className="text-xs">{format(date, "MMM")}</span>
-                  </button>
-                ))}
-              </div>
+              <ScrollArea className="w-full whitespace-nowrap rounded-lg">
+                <div className="flex gap-2 pb-3">
+                  {dates.map((date, index) => {
+                    const isSelected = format(selectedDate, "yyyy-MM-dd") === format(date, "yyyy-MM-dd");
+                    const isToday = index === 0;
+                    
+                    return (
+                      <button
+                        key={date.toISOString()}
+                        onClick={() => setSelectedDate(date)}
+                        className={`flex min-w-[72px] flex-col items-center rounded-xl border-2 p-3 transition-all ${
+                          isSelected
+                            ? "border-primary bg-primary text-primary-foreground shadow-lg shadow-primary/30"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/50 hover:bg-secondary/50"
+                        }`}
+                      >
+                        <span className={`text-[10px] uppercase tracking-wider ${isSelected ? "text-primary-foreground/80" : ""}`}>
+                          {isToday ? "Today" : format(date, "EEE")}
+                        </span>
+                        <span className="text-2xl font-bold">{format(date, "d")}</span>
+                        <span className={`text-xs ${isSelected ? "text-primary-foreground/80" : ""}`}>
+                          {format(date, "MMM")}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <ScrollBar orientation="horizontal" className="h-2" />
+              </ScrollArea>
             </div>
 
             {/* Theaters and Showtimes */}
             <div>
-              <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-card-foreground">
+              <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-card-foreground">
                 <MapPin className="h-5 w-5 text-primary" />
-                Theaters Showing {movie.title}
+                Theaters & Showtimes
               </h2>
 
               {isLoadingShowtimes ? (
                 <div className="space-y-4">
                   {[1, 2, 3].map((i) => (
-                    <div key={i} className="rounded-lg border border-border p-4">
+                    <div key={i} className="rounded-xl border border-border p-4">
                       <Skeleton className="mb-2 h-5 w-48" />
                       <Skeleton className="mb-4 h-4 w-32" />
                       <div className="flex gap-2">
                         {[1, 2, 3, 4].map((j) => (
-                          <Skeleton key={j} className="h-10 w-20" />
+                          <Skeleton key={j} className="h-12 w-24 rounded-lg" />
                         ))}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : theaterShowtimes.length === 0 ? (
-                <div className="rounded-lg border border-border bg-secondary/50 p-8 text-center">
-                  <Clock className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
-                  <p className="text-muted-foreground">
-                    No showtimes available for this date.
-                  </p>
+                <div className="rounded-xl border border-border bg-secondary/30 p-8 text-center">
+                  <Clock className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+                  <p className="font-medium text-card-foreground">No showtimes available</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Try selecting a different date.
+                    Try selecting a different date
                   </p>
                 </div>
               ) : (
@@ -286,21 +399,25 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
                   {theaterShowtimes.map(({ theater, showtimes }) => (
                     <div
                       key={theater.id}
-                      className="rounded-lg border border-border bg-secondary/30 p-4 transition-colors hover:bg-secondary/50"
+                      className="rounded-xl border border-border bg-secondary/20 p-4 transition-all hover:bg-secondary/40"
                     >
                       <div className="mb-3">
-                        <h3 className="text-base font-semibold text-card-foreground">
-                          {theater.name}
-                        </h3>
-                        <p className="text-sm text-muted-foreground">{theater.location}</p>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h3 className="font-semibold text-card-foreground">
+                              {theater.name}
+                            </h3>
+                            <p className="text-sm text-muted-foreground">{theater.location}</p>
+                          </div>
+                        </div>
                         {theater.amenities && theater.amenities.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1">
                             {theater.amenities.map((amenity) => (
                               <span
                                 key={amenity}
-                                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"
                               >
-                                <Sparkles className="h-3 w-3" />
+                                <Sparkles className="h-2.5 w-2.5" />
                                 {amenity}
                               </span>
                             ))}
@@ -313,10 +430,12 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
                           <button
                             key={showtime.id}
                             onClick={() => handleSelectShowtime(showtime)}
-                            className="group rounded-lg border border-primary/30 bg-background px-4 py-2 text-sm font-medium text-primary transition-all hover:border-primary hover:bg-primary hover:text-primary-foreground"
+                            className="group flex flex-col items-center rounded-lg border-2 border-green-500/30 bg-background px-4 py-2 transition-all hover:border-green-500 hover:bg-green-500 hover:shadow-lg hover:shadow-green-500/20"
                           >
-                            <span className="block">{formatShowTime(showtime.show_time)}</span>
-                            <span className="block text-xs opacity-70 group-hover:opacity-100">
+                            <span className="text-sm font-semibold text-green-500 group-hover:text-white">
+                              {formatShowTime(showtime.show_time)}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground group-hover:text-white/80">
                               ₹{showtime.price}
                             </span>
                           </button>
@@ -327,100 +446,32 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
                 </div>
               )}
             </div>
+
+            <Button
+              variant="outline"
+              onClick={() => setStep("select-seats")}
+              className="w-full"
+            >
+              <ChevronLeft className="mr-2 h-4 w-4" />
+              Back
+            </Button>
           </div>
         )}
 
-        {step === "seats-count" && selectedShowtime && (
+        {/* Step 3: Seat Map */}
+        {step === "seat-map" && selectedShowtime && (
           <div className="space-y-6">
-            {/* Selected Showtime Summary */}
-            <div className="rounded-lg bg-secondary p-4">
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Theater</span>
-                  <span className="text-card-foreground">{selectedShowtime.theaters.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Date</span>
-                  <span className="text-card-foreground">
-                    {format(selectedDate, "EEE, MMM d, yyyy")}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Time</span>
-                  <span className="text-card-foreground">
-                    {formatShowTime(selectedShowtime.show_time)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Seats Count Selection */}
-            <div>
-              <label className="mb-2 flex items-center gap-2 text-sm font-medium text-card-foreground">
-                <Users className="h-4 w-4" />
-                How many tickets?
-              </label>
-              <div className="flex items-center gap-4">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setSeatCount(Math.max(1, seatCount - 1))}
-                  disabled={seatCount <= 1}
-                >
-                  -
-                </Button>
-                <span className="w-8 text-center text-lg font-semibold text-card-foreground">
-                  {seatCount}
-                </span>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setSeatCount(Math.min(10, seatCount + 1))}
-                  disabled={seatCount >= 10}
-                >
-                  +
-                </Button>
-              </div>
-            </div>
-
-            {/* Price Preview */}
-            <div className="rounded-lg bg-secondary p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">
-                  {seatCount} ticket{seatCount > 1 ? "s" : ""} × ₹{selectedShowtime.price}
-                </span>
-                <span className="text-xl font-bold text-card-foreground">₹{totalPrice}</span>
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setStep("theater")} className="flex-1">
-                Back
-              </Button>
-              <Button
-                onClick={handleSeatCountConfirm}
-                className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Armchair className="mr-2 h-4 w-4" />
-                Select Seats
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {step === "seat-select" && selectedShowtime && (
-          <div className="space-y-6">
-            {/* Header Info */}
+            {/* Booking Info Bar */}
             <div className="rounded-lg bg-secondary p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <div>
-                  <span className="text-muted-foreground">{selectedShowtime.theaters.name}</span>
-                  <span className="mx-2 text-border">|</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-card-foreground">{selectedShowtime.theaters.name}</span>
+                  <span className="text-border">•</span>
                   <span className="text-muted-foreground">{format(selectedDate, "EEE, MMM d")}</span>
-                  <span className="mx-2 text-border">|</span>
+                  <span className="text-border">•</span>
                   <span className="text-muted-foreground">{formatShowTime(selectedShowtime.show_time)}</span>
                 </div>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-green-500">
                   {availableSeatsCount} seats available
                 </span>
               </div>
@@ -441,19 +492,20 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
             ) : null}
 
             {/* Price Summary */}
-            <div className="rounded-lg bg-secondary p-4">
+            <div className="rounded-lg bg-primary/10 p-4">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">
-                  {selectedSeats.length} seat{selectedSeats.length !== 1 ? "s" : ""} × ₹{selectedShowtime.price}
+                  {selectedSeats.length}/{seatCount} seats × ₹{selectedShowtime.price}
                 </span>
-                <span className="text-xl font-bold text-card-foreground">
+                <span className="text-2xl font-bold text-primary">
                   ₹{selectedShowtime.price * selectedSeats.length}
                 </span>
               </div>
             </div>
 
             <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setStep("seats-count")} className="flex-1">
+              <Button variant="outline" onClick={() => setStep("select-showtime")} className="flex-1">
+                <ChevronLeft className="mr-2 h-4 w-4" />
                 Back
               </Button>
               <Button
@@ -462,11 +514,13 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
                 disabled={selectedSeats.length !== seatCount}
               >
                 Proceed to Payment
+                <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
           </div>
         )}
 
+        {/* Step 4: Payment */}
         {step === "payment" && selectedShowtime && (
           <div className="space-y-6">
             {/* Booking Summary */}
@@ -491,13 +545,14 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
             <PaymentForm
               totalAmount={totalPrice}
               onPaymentComplete={handlePaymentComplete}
-              onBack={() => setStep("seat-select")}
+              onBack={() => setStep("seat-map")}
               isProcessing={isProcessing}
               setIsProcessing={setIsProcessing}
             />
           </div>
         )}
 
+        {/* Step 5: Success */}
         {step === "success" && selectedShowtime && bookingId && (
           <BookingReceipt
             movieTitle={movie.title}
