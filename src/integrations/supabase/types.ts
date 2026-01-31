@@ -297,7 +297,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      book_seats_atomic: {
+        Args: {
+          p_movie_id: string
+          p_seat_numbers: string[]
+          p_show_date: string
+          p_show_time: string
+          p_showtime_id: string
+          p_total_price: number
+          p_user_id: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       booking_status: "pending" | "paid" | "cancelled" | "refunded"
