@@ -124,31 +124,36 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
   };
 
   const handlePaymentComplete = async () => {
-    if (!selectedShowtime) return;
+    if (!selectedShowtime || !user) return;
 
     try {
-      const booking = await createBooking.mutateAsync({
-        movieId: movie.id,
-        seats: seatCount,
-        totalPrice,
-        showDate: format(selectedDate, "yyyy-MM-dd"),
-        showTime: selectedShowtime.show_time,
+      // Use atomic database function to prevent race conditions and double-booking
+      const { data: bookingIdResult, error } = await supabase.rpc('book_seats_atomic', {
+        p_user_id: user.id,
+        p_showtime_id: selectedShowtime.id,
+        p_seat_numbers: selectedSeats,
+        p_movie_id: movie.id,
+        p_total_price: totalPrice,
+        p_show_date: format(selectedDate, "yyyy-MM-dd"),
+        p_show_time: selectedShowtime.show_time,
       });
 
-      await supabase
-        .from("bookings")
-        .update({ booked_seats: selectedSeats, status: "paid" })
-        .eq("id", booking.id);
-
-      for (const seatNumber of selectedSeats) {
-        await supabase
-          .from("showtime_seats")
-          .update({ is_booked: true, booking_id: booking.id })
-          .eq("showtime_id", selectedShowtime.id)
-          .eq("seat_number", seatNumber);
+      if (error) {
+        // Handle specific error cases
+        if (error.message.includes('already booked')) {
+          toast({
+            title: "Seats No Longer Available",
+            description: "One or more selected seats were just booked by another user. Please select different seats.",
+            variant: "destructive",
+          });
+          setSelectedSeats([]);
+          setStep("seat-map");
+          return;
+        }
+        throw error;
       }
 
-      setBookingId(booking.id);
+      setBookingId(bookingIdResult);
       
       toast({
         title: "📧 Booking Confirmed!",
@@ -156,7 +161,8 @@ const BookingDialog = ({ movie, open, onOpenChange }: BookingDialogProps) => {
       });
       
       setStep("success");
-    } catch {
+    } catch (err) {
+      console.error("Booking error:", err);
       toast({
         title: "Booking Failed",
         description: "Something went wrong. Please try again.",
